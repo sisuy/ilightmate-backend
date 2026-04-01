@@ -1,9 +1,10 @@
 # iLightMate 后端交接文档 — Steve
 
-> 日期：2026-03-31
+> 日期：2026-03-31（v2 更新）
 > 项目：ruoyi-ilightmate-backend
+> GitHub：https://github.com/sisuy/ilightmate-backend
 > 基于：RuoYi 4.8.3（https://gitee.com/y_project/RuoYi）
-> 状态：**核心代码已完成，需要配置环境变量 + 微信支付 SDK 初始化 + 编译测试**
+> 状态：**业务逻辑全部完成（45 个 Java 文件 / 3,065 行），需要配环境变量 + 微信 SDK 填充 + 编译测试**
 
 ---
 
@@ -11,428 +12,422 @@
 
 ```
 ruoyi-ilightmate-backend/
-├── ruoyi-admin/              ← 启动入口（已修改 pom.xml 引入 ilightmate 模块）
-├── ruoyi-framework/          ← JWT + Redis + 拦截器（RuoYi 自带，不改）
-├── ruoyi-system/             ← sys_user + sys_role（RuoYi 自带，不改）
-├── ruoyi-common/             ← 工具类 + AjaxResult（RuoYi 自带，不改）
-├── ruoyi-generator/          ← 代码生成器（可选）
-├── ruoyi-quartz/             ← 定时任务（订阅过期检查用）
-├── ruoyi-ilightmate/         ← ★ iLightMate 业务模块（我写的）
-│   ├── controller/  (6)
-│   ├── service/     (7 接口 + 7 实现)
-│   ├── mapper/      (7)
-│   ├── domain/      (4)
-│   ├── dto/         (2)
-│   └── config/      (4)
+├── ruoyi-admin/              ← 启动入口（已修改 pom + application.yml）
+├── ruoyi-framework/          ← JWT + Redis + 拦截器（RuoYi 自带）
+├── ruoyi-system/             ← sys_user + sys_role（RuoYi 自带）
+├── ruoyi-common/             ← AjaxResult + 工具类（RuoYi 自带）
+├── ruoyi-quartz/             ← 定时任务（用于订阅过期 + 续费提醒 + 自动续费）
+├── ruoyi-ilightmate/         ← ★ iLightMate 业务模块
+│   ├── controller/   (7)     ← API 端点
+│   ├── service/      (9 接口 + 9 实现)  ← 业务逻辑
+│   ├── mapper/       (7)     ← MyBatis 数据访问
+│   ├── domain/       (4)     ← 实体类
+│   ├── dto/          (2)     ← 请求 DTO
+│   ├── config/       (4)     ← AI/支付/SMS 配置
+│   └── task/         (3)     ← 定时任务
 ├── sql/
-│   └── ilightmate.sql        ← ★ 19 张业务表 + 种子数据
-└── pom.xml                   ← 已添加 ruoyi-ilightmate 模块
+│   └── ilightmate.sql        ← 19 张表 + 种子数据
+└── HANDOFF-STEVE-BACKEND.md  ← 本文件
 ```
-
-**总计：37 个 Java 文件，2,221 行代码，19 张 MySQL 表。**
 
 ---
 
 ## 二、启动步骤
 
-### Step 1: 环境准备
+### Step 1: 环境要求
 
-```bash
-# 要求
-JDK 17+
-MySQL 5.7+
-Redis 6+
-Maven 3.8+
+```
+JDK 17+  |  MySQL 5.7+  |  Redis 6+  |  Maven 3.8+
 ```
 
 ### Step 2: 建库建表
 
 ```bash
-# 1. 创建数据库
 mysql -u root -p -e "CREATE DATABASE ruoyi_ilm DEFAULT CHARSET utf8mb4;"
-
-# 2. 导入 RuoYi 系统表（在 sql/ 目录下找 ry_*.sql）
-mysql -u root -p ruoyi_ilm < sql/ry_20240601.sql
-mysql -u root -p ruoyi_ilm < sql/quartz.sql
-
-# 3. 导入 iLightMate 业务表
-mysql -u root -p ruoyi_ilm < sql/ilightmate.sql
+mysql -u root -p ruoyi_ilm < sql/ry_20240601.sql    # RuoYi 系统表
+mysql -u root -p ruoyi_ilm < sql/quartz.sql          # 定时任务表
+mysql -u root -p ruoyi_ilm < sql/ilightmate.sql      # ★ iLightMate 19 张业务表
 ```
 
-### Step 3: 配置数据库连接
+### Step 3: 配置数据库
 
-编辑 `ruoyi-admin/src/main/resources/application-druid.yml`：
-
+`ruoyi-admin/src/main/resources/application-druid.yml`：
 ```yaml
-spring:
-  datasource:
-    druid:
-      master:
-        url: jdbc:mysql://localhost:3306/ruoyi_ilm?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8
-        username: root
-        password: YOUR_PASSWORD
+spring.datasource.druid.master:
+  url: jdbc:mysql://localhost:3306/ruoyi_ilm?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=true&serverTimezone=GMT%2B8
+  username: root
+  password: YOUR_PASSWORD
 ```
 
 ### Step 4: 配置环境变量
 
-在 `application.yml` 末尾已添加 `ilightmate.*` 配置块。以下环境变量需要设置：
+| 变量 | 说明 | 必填 | 开发模式 |
+|------|------|------|---------|
+| `AI_API_KEY` | AI API Key（MiniMax/Claude） | 是 | 需要 |
+| `ALIYUN_ACCESS_KEY_ID` | 阿里云 SMS | 否 | 关闭 SMS 时不需要 |
+| `ALIYUN_ACCESS_KEY_SECRET` | 阿里云 SMS | 否 | 同上 |
+| `ALIYUN_SMS_TEMPLATE` | 短信模板编号 | 否 | 同上 |
+| `ALIPAY_APP_ID` | 支付宝 | 否 | 不测支付时不需要 |
+| `ALIPAY_PRIVATE_KEY` | 支付宝 | 否 | 同上 |
+| `ALIPAY_PUBLIC_KEY` | 支付宝 | 否 | 同上 |
+| `WECHAT_APP_ID` | 微信支付 | 否 | 同上 |
+| `WECHAT_MCH_ID` | 微信商户号 | 否 | 同上 |
+| `WECHAT_API_KEY_V3` | 微信 V3 密钥 | 否 | 同上 |
+| `WECHAT_CERT_SERIAL_NO` | 微信证书序列号 | 否 | 同上 |
+| `WECHAT_PRIVATE_KEY_PATH` | 微信私钥路径 | 否 | 同上 |
 
-| 变量 | 说明 | 示例 |
-|------|------|------|
-| `AI_API_KEY` | AI 提供商 API Key | `sk-xxxxxxxx` |
-| `ALIYUN_ACCESS_KEY_ID` | 阿里云 SMS | `LTAI5txxxxxxx` |
-| `ALIYUN_ACCESS_KEY_SECRET` | 阿里云 SMS | `xxxxxxxxxx` |
-| `ALIYUN_SMS_TEMPLATE` | 短信模板编号 | `SMS_12345678` |
-| `ALIPAY_APP_ID` | 支付宝应用 ID | `2021xxxxxxxx` |
-| `ALIPAY_PRIVATE_KEY` | 支付宝应用私钥 | RSA2 密钥 |
-| `ALIPAY_PUBLIC_KEY` | 支付宝公钥 | RSA2 公钥 |
-| `WECHAT_APP_ID` | 微信支付 AppID | `wx1234567890` |
-| `WECHAT_MCH_ID` | 微信商户号 | `1234567890` |
-| `WECHAT_API_KEY_V3` | 微信支付 V3 密钥 | `xxxxxxxxxx` |
-| `WECHAT_CERT_SERIAL_NO` | 微信证书序列号 | `xxxxxxxxxx` |
-| `WECHAT_PRIVATE_KEY_PATH` | 微信私钥文件路径 | `/path/to/apiclient_key.pem` |
-
-**开发模式可以先不配支付和 SMS。** SMS 关闭时验证码会打印到控制台日志。
+**开发模式最少只需要 `AI_API_KEY`。** SMS 关闭时验证码打印到控制台。
 
 ### Step 5: 编译启动
 
 ```bash
-cd ruoyi-ilightmate-backend
 mvn clean package -DskipTests
-cd ruoyi-admin
-mvn spring-boot:run
+cd ruoyi-admin && mvn spring-boot:run
 ```
-
-或者用 IDE（IntelliJ IDEA）直接运行 `RuoYiApplication.java`。
 
 ### Step 6: 验证
 
 ```bash
-# 健康检查
-curl http://localhost/
-
-# 获取套餐列表（不需要登录）
 curl http://localhost/api/combo/query
-
-# 应该返回 3 个套餐（体验版/成长版/专业版）
+# 应返回 4 条套餐（体验版月付 + 成长版月付 + 成长版年付 + 专业版年付）
 ```
 
 ---
 
-## 三、API 端点清单（13 个）
+## 三、完整 API 清单（16 个端点）
 
-前端已经按这些路径写好了调用代码（`ilightmate/src/api/*.ts`），后端只需要返回匹配的 JSON 格式。
+### 认证（5 个）
 
-### 认证
+| 方法 | 路径 | 说明 | 认证 |
+|------|------|------|------|
+| GET | `/resource/sms/code/login?phonenumber=X` | 发短信验证码 | 无 |
+| POST | `/auth/smsLogin` | 短信登录 | 无 |
+| POST | `/auth/login` | 密码登录（RuoYi 自带） | 无 |
+| GET | `/system/user/getInfo` | 获取用户信息 | Bearer |
+| POST | `/system/user/bind-referral-code` | 绑定推荐码 | Bearer |
 
-| # | 方法 | 路径 | 说明 | 认证 |
-|---|------|------|------|------|
-| 1 | GET | `/resource/sms/code/login?phonenumber=X` | 发送短信验证码 | 无 |
-| 2 | POST | `/auth/smsLogin` | 短信登录 | 无 |
-| 3 | POST | `/auth/login` | 密码登录（RuoYi 自带） | 无 |
-| 4 | GET | `/system/user/getInfo` | 获取用户信息（RuoYi 自带） | Bearer |
-| 5 | POST | `/system/user/bind-referral-code` | 绑定推荐码 | Bearer |
+### AI 对话（1 个）
 
-### AI 对话
+| 方法 | 路径 | 说明 | 认证 |
+|------|------|------|------|
+| POST | `/system/ai/chat` | SSE 流式对话 + 服务端 token 计量 | Bearer |
 
-| # | 方法 | 路径 | 说明 | 认证 |
-|---|------|------|------|------|
-| 6 | POST | `/system/ai/chat` | AI 对话（SSE 流式） | Bearer |
+### 套餐（3 个）
 
-**关键逻辑：**
-- 请求前检查 token 额度（Redis `ilm:token:{userId}:{YYYY-MM}`）
-- 超额返回 429
-- 转发到 Claude/MiniMax（根据 `ilightmate.ai.provider` 配置）
-- SSE 格式：`data: {"content":"..."}\n\n` + `data: [DONE]\n\n`
-- 响应后 Redis INCRBY 计入实际 token 数
-- 异步写入 MySQL `ilm_token_usage`
+| 方法 | 路径 | 说明 | 认证 |
+|------|------|------|------|
+| GET | `/consultant/user/combo/{userId}` | 用户当前套餐 | Bearer |
+| GET | `/api/combo/query` | 套餐列表 | 无 |
+| GET | `/consultant/combo/{comboId}/benefits` | 套餐权益 | 无 |
 
-### 套餐
+### 支付（5 个）
 
-| # | 方法 | 路径 | 说明 | 认证 |
-|---|------|------|------|------|
-| 7 | GET | `/consultant/user/combo/{userId}` | 用户当前套餐 | Bearer |
-| 8 | GET | `/api/combo/query` | 所有套餐列表 | 无 |
-| 9 | GET | `/consultant/combo/{comboId}/benefits` | 套餐权益 | 无 |
+| 方法 | 路径 | 说明 | 认证 |
+|------|------|------|------|
+| POST | `/api/comboOrder/create-minimal` | 创建订单 | Bearer |
+| POST | `/api/pay/alipay/page` | 支付宝支付 | Bearer |
+| POST | `/api/pay/wechat/pc` | 微信支付 | Bearer |
+| GET | `/api/pay/alipay/query` | 支付宝查询 | Bearer |
+| GET | `/api/pay/wechat/query` | 微信查询 | Bearer |
 
-### 支付
+### Token 加购（2 个）
 
-| # | 方法 | 路径 | 说明 | 认证 |
-|---|------|------|------|------|
-| 10 | POST | `/api/comboOrder/create-minimal` | 创建订单 | Bearer |
-| 11 | POST | `/api/pay/alipay/page` | 支付宝支付 | Bearer |
-| 12 | POST | `/api/pay/wechat/pc` | 微信支付 | Bearer |
-| 13 | GET | `/api/pay/alipay/query` | 支付宝查询 | Bearer |
-| 13b | GET | `/api/pay/wechat/query` | 微信查询 | Bearer |
+| 方法 | 路径 | 说明 | 认证 |
+|------|------|------|------|
+| GET | `/api/tokenAddon/list` | 可用加购包列表 | Bearer |
+| POST | `/api/tokenAddon/create` | 创建加购包订单 | Bearer |
 
-**回调（不需要认证）：**
-- POST `/api/pay/alipay/notify` — 支付宝异步回调
-- POST `/api/pay/wechat/notify` — 微信异步回调
+### 回调（不需要认证，2 个）
 
-### 埋点
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/pay/alipay/notify` | 支付宝异步回调 |
+| POST | `/api/pay/wechat/notify` | 微信异步回调 |
 
-| # | 方法 | 路径 | 说明 | 认证 |
-|---|------|------|------|------|
-| 14 | POST | `/system/analytics/events` | 行为事件批量上报 | Bearer |
+### 埋点（1 个）
 
----
-
-## 四、数据库表（19 张）
-
-### W1 核心表（8 张，必须在上线前可用）
-
-| 表名 | 说明 | 关键字段 |
-|------|------|---------|
-| `ilm_token_usage` | 月度 token 计量 | user_id, month_key(YYYY-MM), used, bonus |
-| `ilm_dialogue_usage` | 每日对话计数 | user_id, date_key, count |
-| `ilm_combo_plans` | 套餐目录 | combo_code(0/1/2), price, monthly_token_limit |
-| `ilm_user_subscriptions` | 用户当前订阅 | user_id, combo_id, start_time, end_time |
-| `ilm_orders` | 订单 | order_no, pay_amount, pay_status, pay_type |
-| `ilm_partners` | 推荐伙伴 | partner_type, referral_code(CH/SL/MT) |
-| `ilm_user_attribution` | 用户归因 | user_id, entry_type, referral_code, locked |
-| `ilm_behavioral_events` | 行为事件 | event_type, companion_id, payload(JSON) |
-
-### W2 用户数据表（11 张，W1 建表但 API 可以后补）
-
-| 表名 | 说明 |
-|------|------|
-| `ilm_explore_scores` | 七维分数 |
-| `ilm_diary_entries` | 日记 |
-| `ilm_theater_sessions` | 剧场记录 |
-| `ilm_legacy_members` | 传承成员 |
-| `ilm_emotion_tags` | 情绪标签 |
-| `ilm_activities` | 活动记录 |
-| `ilm_dialogue_history` | 对话摘要 |
-| `ilm_coach_sessions` | 明场教练会话 |
-| `ilm_user_consent` | PIPL 同意状态 |
-| `ilm_user_onboarding` | 引导状态 |
-
-### 种子数据
-
-`ilm_combo_plans` 已包含 4 条种子数据（体验版月付 + 成长版月付 + 成长版年付 + 专业版年付）。
-
-### sys_user 扩展
-
-已在 SQL 中添加：
-```sql
-ALTER TABLE sys_user ADD COLUMN invite_code VARCHAR(20);
-ALTER TABLE sys_user ADD COLUMN sys_language VARCHAR(10) DEFAULT 'zh-CN';
-```
+| 方法 | 路径 | 说明 | 认证 |
+|------|------|------|------|
+| POST | `/system/analytics/events` | 行为事件上报 | Bearer |
 
 ---
 
-## 五、你需要做的 3 件事
+## 四、完整业务逻辑清单
 
-### 1. 配置环境变量（30 分钟）
+### 订阅生命周期
 
-参照上面 Step 4 的表格，把 AI/SMS/支付的密钥配进去。开发阶段可以先只配 `AI_API_KEY`，SMS 设 `enabled: false`，支付先不配。
+```
+用户注册
+  → 体验版（默认，免费，50K tokens/月）
+  → 可获得试用（成长版 7 天 / 专业版 10 天 / 邀请奖励 7 天）
 
-### 2. 微信支付 SDK 初始化（2-3 小时）
+购买成长版月付（首月 ¥9.9，之后 ¥19/月）
+  → createOrder() 自动检测首次购买 → 应用首月特惠
+  → 支付成功 → markPaid()
+    → activateSubscription()：月付 +1 月
+    → 首付锁定归因
+    → 如果是导师邀请客户 → 导师 +200K token
 
-`IlmPayServiceImpl.java` 中有 3 个 `// TODO` 标记，需要用 `wechatpay-java` SDK 填充：
+购买成长版年付（¥198/年）
+  → activateSubscription()：年付 +1 年
 
-**位置 1：`createWechatNative()`** — 创建 Native 支付
-```java
-// 需要初始化 NativePayService，调用 prepay()，返回 codeUrl
+升级专业版（¥1,680/年）
+  → activateSubscription()：
+    → 旧订阅立即过期
+    → 新订阅从当前时间开始 +1 年
+
+续费（同级）
+  → activateSubscription()：从 end_time 延长（不是从今天）
+
+到期
+  → SubscriptionExpireTask（每天 00:05）自动标记过期
+  → 用户降为体验版
+
+续费提醒
+  → SubscriptionRenewRemindTask（每天 10:00）
+    → 3 天前提醒
+    → 当天提醒
+    → 过期 1 天后最后挽回
+
+自动续费（月付代扣）
+  → AutoRenewTask（每天 08:30）
+    → 查找今天到期的月付 + 有代扣签约的用户
+    → 调用代扣 → 成功则自动续费
 ```
 
-**位置 2：`queryWechat()`** — 查询微信订单
-```java
-// 需要调用 queryOrderByOutTradeNo()
+### 支付后完整流程
+
+```
+支付回调 → markPaid(orderNo, payType, transactionNo)
+  │
+  ├─ 加购包订单？（remark 以 TOKEN_ADDON: 开头）
+  │   → tokenService.addBonusTokens() → 完成
+  │
+  ├─ 自动续费订单？（remark 以 AUTO_RENEW: 开头）
+  │   → comboService.activateSubscription() → 完成
+  │
+  └─ 普通订阅订单
+      → comboService.activateSubscription()
+      → 首次付费？
+          → 锁定归因（attributionMapper.lockAttribution）
+          → 检查是否导师邀请的客户
+              → 是：给导师 +200K token
+      → 完成
 ```
 
-**位置 3：`handleWechatNotify()`** — 处理异步回调
-```java
-// 需要验签 + 解密 + 解析 Transaction
+### Token 计量
+
+```
+AI 对话请求 → IlmAiChatController
+  → 检查月度 token 额度（Redis 热路径）
+    → 超额 → 429 "Token额度已用尽"
+  → 检查每日对话次数
+    → 超额 → 429 "今日对话次数已用完"
+  → 转发 AI（Claude/MiniMax SSE 流式）
+  → 响应后 Redis INCRBY 计入实际 token
+  → 异步写入 MySQL
 ```
 
-参考文档：https://github.com/wechatpay-apiv3/wechatpay-java
+| 套餐 | 月 Token | 日对话 | 加购 |
+|------|---------|--------|------|
+| 体验版 | 50K | 5 次 | 不支持 |
+| 成长版 | 500K | 无限 | ¥9.9/100K |
+| 专业版 | 3M | 无限 | ¥49/500K 或 ¥399/5M |
 
-### 3. RuoYi 安全配置调整（1 小时）
+### 退款
 
-需要在 RuoYi 的 Shiro/Security 配置中放行以下路径（不需要登录的接口）：
+```
+refund(orderNo, reason, amount)
+  → 调支付宝/微信退款 API
+  → 订单状态 → REFUNDED
+  → 用户所有活跃订阅 → 过期
+  → 用户降为体验版
+```
+
+---
+
+## 五、你需要做的事
+
+### 必须（上线前）
+
+| # | 任务 | 时间 | 说明 |
+|---|------|------|------|
+| 1 | 配环境变量 + 编译启动 | 30 分钟 | 至少配 AI_API_KEY |
+| 2 | RuoYi 安全配置放行 | 1 小时 | 见下方 |
+| 3 | 微信支付 SDK 填充 | 2-3 小时 | IlmPayServiceImpl 4 个 TODO |
+| 4 | 测试 SMS 登录 | 30 分钟 | 开发模式验证码在控制台 |
+| 5 | 测试 AI 对话 SSE | 30 分钟 | curl 测试 |
+| 6 | 后台配置 3 个定时任务 | 15 分钟 | 见下方 |
+
+### 后续（W2+）
+
+| # | 任务 | 时间 | 说明 |
+|---|------|------|------|
+| 7 | 用户数据 CRUD API（11 张表） | 5-7 天 | 替代前端 localStorage |
+| 8 | 微信代扣签约 | 2-3 天 | AutoRenewTask 里的 TODO |
+| 9 | 推送服务对接 | 1-2 天 | 续费提醒的 sendRemind() |
+| 10 | 后台管理 API | 按需 | 替换前端 mock |
+
+### RuoYi 安全配置放行
+
+在 ShiroConfig.java 或 SecurityConfig.java 中添加：
 
 ```java
-// ShiroConfig.java 或 SecurityConfig.java 中添加：
+// 不需要登录的接口
 filterChainDefinitionMap.put("/api/combo/query", "anon");
+filterChainDefinitionMap.put("/consultant/combo/**", "anon");
 filterChainDefinitionMap.put("/resource/sms/code/login", "anon");
 filterChainDefinitionMap.put("/auth/smsLogin", "anon");
 filterChainDefinitionMap.put("/api/pay/alipay/notify", "anon");
 filterChainDefinitionMap.put("/api/pay/wechat/notify", "anon");
 ```
 
-同时确保 `/system/ai/chat` 需要登录（默认就需要）。
+XSS 过滤也需要排除支付回调：
 
----
-
-## 六、Token 计量机制详解
-
-这是最核心的服务端逻辑，直接影响收入。
-
-### 流程
-
-```
-前端 POST /system/ai/chat
-  ↓
-IlmAiChatController.chat()
-  ↓
-1. tokenService.isMonthlyLimitReached(userId)
-   → Redis GET ilm:token:{userId}:2026-03
-   → 如果 >= monthlyTokenLimit → 返回 429
-  ↓
-2. tokenService.isDailyDialogueLimitReached(userId)
-   → Redis GET ilm:dialogue:{userId}:2026-03-31
-   → 如果 >= dailyDialogueLimit → 返回 429
-  ↓
-3. aiProxyService.streamChat(req, writer, userId)
-   → OkHttp 调 Claude/MiniMax API
-   → SSE 逐行转发给前端
-   → 返回 tokensUsed（从 AI response.usage 提取）
-  ↓
-4. tokenService.incrementTokenUsage(userId, tokensUsed)
-   → Redis INCRBY ilm:token:{userId}:2026-03 {tokensUsed}
-   → @Async 写入 MySQL ilm_token_usage
-  ↓
-5. tokenService.incrementDialogueCount(userId)
-   → Redis INCRBY ilm:dialogue:{userId}:2026-03-31 1
-   → @Async 写入 MySQL ilm_dialogue_usage
-```
-
-### 额度上限
-
-| 套餐 | 月 Token | 日对话 |
-|------|---------|--------|
-| 体验版 | 50,000 | 5 |
-| 成长版 | 500,000 | -1（无限） |
-| 专业版 | 3,000,000 | -1（无限） |
-
-### 加购包
-
-当用户购买 token 加购包时，调用 `tokenService.addBonusTokens(userId, tokens)`，在 MySQL 中增加 bonus 字段。
-
----
-
-## 七、AI 对话代理详解
-
-### 支持的 AI 提供商
-
-| 提供商 | application.yml 中 provider 值 | API 格式 |
-|--------|------------------------------|----------|
-| MiniMax | `minimax` | OpenAI 兼容 |
-| Claude | `claude` | Anthropic 格式 |
-| OpenAI/兼容 | `openai` | 标准 OpenAI |
-
-### SSE 流式格式
-
-前端期望的格式：
-```
-data: {"content":"你"}
-data: {"content":"好"}
-data: {"content":"，我是若曦"}
-data: [DONE]
-```
-
-后端从 AI 提供商收到的原始格式会被转换为上述统一格式。
-
-### 切换 AI 提供商
-
-修改 `application.yml`：
 ```yaml
-ilightmate:
-  ai:
-    provider: claude
-    api-url: https://api.anthropic.com/v1/messages
-    api-key: sk-ant-api03-xxxxxxx
-    model-id: claude-sonnet-4-20250514
+# application.yml
+xss:
+  excludes: /system/notice/*,/api/pay/alipay/notify,/api/pay/wechat/notify
 ```
+
+### 定时任务配置
+
+在 RuoYi 后台「系统监控 → 定时任务」中添加 3 个任务：
+
+| 任务名称 | 调用目标 | Cron | 说明 |
+|---------|---------|------|------|
+| 订阅过期检查 | `ilmSubscriptionExpireTask.execute()` | `0 5 0 * * ?` | 每天 00:05 |
+| 续费提醒 | `ilmSubscriptionRenewRemindTask.execute()` | `0 0 10 * * ?` | 每天 10:00 |
+| 自动续费 | `ilmAutoRenewTask.execute()` | `0 30 8 * * ?` | 每天 08:30 |
+
+### 微信支付 TODO 位置（4 个）
+
+文件：`IlmPayServiceImpl.java`
+
+| 位置 | 方法 | 需要做什么 |
+|------|------|---------|
+| 1 | `createWechatNative()` | 用 NativePayService.prepay() 生成二维码 URL |
+| 2 | `queryWechat()` | 用 queryOrderByOutTradeNo() 查询订单状态 |
+| 3 | `handleWechatNotify()` | 验签 + 解密 + 解析 Transaction |
+
+文件：`IlmRefundServiceImpl.java`
+
+| 位置 | 方法 | 需要做什么 |
+|------|------|---------|
+| 4 | `refundWechat()` | 用 RefundService.create() 发起退款 |
+
+SDK 文档：https://github.com/wechatpay-apiv3/wechatpay-java
 
 ---
 
-## 八、SMS 登录流程
+## 六、文件清单（45 个 Java 文件）
 
-```
-1. 前端 GET /resource/sms/code/login?phonenumber=13800000000
-   ↓
-2. 后端生成 6 位随机码，存入 Redis（5 分钟过期）
-   key: ilm:sms:13800000000 → "123456"
-   ↓
-3. 通过阿里云 SMS 发送（生产）/ 打印日志（开发）
-   ↓
-4. 前端 POST /auth/smsLogin { phonenumber, smsCode }
-   ↓
-5. 后端从 Redis 取验证码，比对
-   ↓
-6. 查 sys_user：存在 → 登录；不存在 → 自动注册
-   ↓
-7. 通过 RuoYi TokenService 签发 JWT
-   ↓
-8. 返回 { access_token, userInfo }
-```
+### Controller（7 个）
 
-**开发模式：** `ilightmate.sms.enabled: false` 时，验证码不发短信，直接打印到控制台：
-```
-[DEV MODE] SMS code for 13800000000: 123456
-```
+| 文件 | 端点 |
+|------|------|
+| `IlmAuthController.java` | SMS 登录 + 推荐码绑定 |
+| `IlmAiChatController.java` | AI 对话 SSE + token 检查 |
+| `IlmComboController.java` | 套餐查询 |
+| `IlmOrderController.java` | 订单创建 + 查询 |
+| `IlmPayController.java` | 支付宝 + 微信支付 + 回调 |
+| `IlmTokenAddonController.java` | Token 加购包 |
+| `IlmAnalyticsController.java` | 行为埋点上报 |
 
----
+### Service（9 接口 + 9 实现 = 18 个）
 
-## 九、支付流程
+| 接口 | 实现 | 职责 |
+|------|------|------|
+| `IIlmSmsService` | `IlmSmsServiceImpl` | 阿里云 SMS + Redis 验证码 + JWT |
+| `IIlmAiProxyService` | `IlmAiProxyServiceImpl` | AI SSE 流式代理（Claude/MiniMax） |
+| `IIlmTokenService` | `IlmTokenServiceImpl` | Redis 热路径 token 计量 |
+| `IIlmComboService` | `IlmComboServiceImpl` | 订阅管理（新购/续费/升级/试用） |
+| `IIlmOrderService` | `IlmOrderServiceImpl` | 订单（首月特惠/归因锁定/导师奖励） |
+| `IIlmPayService` | `IlmPayServiceImpl` | 支付宝 SDK + 微信 V3 |
+| `IIlmTokenAddonService` | `IlmTokenAddonServiceImpl` | Token 加购包 |
+| `IIlmRefundService` | `IlmRefundServiceImpl` | 退款 + 撤销订阅 |
+| `IIlmAnalyticsService` | `IlmAnalyticsServiceImpl` | 行为事件批量存储 |
 
-### 支付宝（已完整实现）
+### Mapper（7 个）
 
-```
-创建订单 → 调支付宝 SDK 生成支付页面 → 前端跳转 → 用户支付
-→ 支付宝异步回调 /api/pay/alipay/notify → 验签 → markPaid → 激活订阅
-→ 前端轮询 /api/pay/alipay/query 确认状态
-```
+| 文件 | 表 |
+|------|---|
+| `IlmTokenUsageMapper` | `ilm_token_usage` |
+| `IlmDialogueUsageMapper` | `ilm_dialogue_usage` |
+| `IlmComboPlanMapper` | `ilm_combo_plans` |
+| `IlmUserSubscriptionMapper` | `ilm_user_subscriptions` |
+| `IlmOrderMapper` | `ilm_orders` |
+| `IlmUserAttributionMapper` | `ilm_user_attribution` |
+| `IlmBehavioralEventMapper` | `ilm_behavioral_events` |
 
-### 微信（框架完整，3 个 TODO 需填充）
+### Domain + DTO（6 个）
 
-```
-创建订单 → 调微信 SDK 生成二维码 URL → 前端展示 → 用户扫码
-→ 微信异步回调 /api/pay/wechat/notify → 验签解密 → markPaid → 激活订阅
-→ 前端轮询 /api/pay/wechat/query 确认状态
-```
+| 文件 | 说明 |
+|------|------|
+| `IlmTokenUsage` | 月度 token |
+| `IlmComboPlan` | 套餐定义 |
+| `IlmUserSubscription` | 用户订阅 |
+| `IlmOrder` | 订单 |
+| `ChatRequestDTO` | AI 对话请求 |
+| `CreateOrderDTO` | 创建订单请求 |
 
-### 支付成功后的订阅激活
+### Config（4 个）
 
-`IlmOrderServiceImpl.markPaid()` → `IlmComboServiceImpl.activateSubscription()`：
-1. 更新订单状态为 PAID
-2. 创建 `ilm_user_subscriptions` 记录
-3. 根据 billingCycle 计算 end_time（月付 +1 月，年付 +1 年）
+| 文件 | 配置前缀 |
+|------|---------|
+| `AiProviderConfig` | `ilightmate.ai.*` |
+| `AlipayConfig` | `ilightmate.alipay.*` |
+| `WechatPayConfig` | `ilightmate.wechat.*` |
+| `SmsConfig` | `ilightmate.sms.*` |
 
----
+### 定时任务（3 个）
 
-## 十、前端 API 对应关系
-
-前端代码在 `ilightmate/src/api/` 下，每个文件对应的后端 Controller：
-
-| 前端文件 | 后端 Controller | 说明 |
-|---------|----------------|------|
-| `auth.ts` | IlmAuthController + RuoYi 自带 | 登录注册 |
-| `ai.ts` | IlmAiChatController | AI 对话 |
-| `combo.ts` | IlmComboController | 套餐查询 |
-| `payment.ts` | IlmOrderController + IlmPayController | 支付 |
-
-前端的 `src/lib/request.ts` 配置了：
-- Base URL: `VITE_API_BASE_URL + "/api"`（但实际路径不全在 /api 下）
-- Auth: 自动注入 `Authorization: Bearer {token}`
-- 响应格式: `{ code: 200, msg: "success", data: T }`
-- 401 → 跳转登录页
-
-**响应格式必须是 RuoYi 标准的 `AjaxResult`：**
-```java
-AjaxResult.success(data);     // { code: 0, msg: "操作成功", data: ... }
-AjaxResult.error("message");  // { code: 500, msg: "message" }
-```
+| 文件 | Bean 名称 | Cron |
+|------|----------|------|
+| `SubscriptionExpireTask` | `ilmSubscriptionExpireTask` | `0 5 0 * * ?` |
+| `SubscriptionRenewRemindTask` | `ilmSubscriptionRenewRemindTask` | `0 0 10 * * ?` |
+| `AutoRenewTask` | `ilmAutoRenewTask` | `0 30 8 * * ?` |
 
 ---
 
-## 十一、注意事项
+## 七、数据库表（19 张）
 
-### CORS 配置
+| 表名 | 说明 | W1 必须 |
+|------|------|--------|
+| `ilm_token_usage` | 月度 token 计量 | 是 |
+| `ilm_dialogue_usage` | 每日对话计数 | 是 |
+| `ilm_combo_plans` | 套餐目录（含种子数据） | 是 |
+| `ilm_user_subscriptions` | 用户订阅 | 是 |
+| `ilm_orders` | 订单 | 是 |
+| `ilm_partners` | 推荐伙伴 | 是 |
+| `ilm_user_attribution` | 用户归因 | 是 |
+| `ilm_behavioral_events` | 行为事件 | 是 |
+| `ilm_explore_scores` | 七维分数 | W2 |
+| `ilm_diary_entries` | 日记 | W2 |
+| `ilm_theater_sessions` | 剧场记录 | W2 |
+| `ilm_legacy_members` | 传承成员 | W2 |
+| `ilm_emotion_tags` | 情绪标签 | W2 |
+| `ilm_activities` | 活动记录 | W2 |
+| `ilm_dialogue_history` | 对话摘要 | W2 |
+| `ilm_coach_sessions` | 明场教练会话 | W2 |
+| `ilm_user_consent` | PIPL 同意 | W2 |
+| `ilm_user_onboarding` | 引导状态 | W2 |
 
-前端和后端不同域时需要配置跨域。在 RuoYi 的 `ResourcesConfig.java` 或 `ShiroConfig.java` 中：
+另外 `sys_user` 表新增了 `invite_code` 和 `sys_language` 两个字段。
+
+---
+
+## 八、Redis 键规范
+
+| 键 | 用途 | TTL |
+|----|------|-----|
+| `ilm:token:{userId}:{YYYY-MM}` | 月度 token 计量 | 35 天 |
+| `ilm:dialogue:{userId}:{YYYY-MM-DD}` | 每日对话计数 | 48 小时 |
+| `ilm:sms:{phone}` | SMS 验证码 | 5 分钟 |
+
+---
+
+## 九、CORS 配置
 
 ```java
 registry.addMapping("/**")
@@ -442,54 +437,17 @@ registry.addMapping("/**")
     .allowCredentials(true);
 ```
 
-### Redis 键命名规范
+---
 
-| 键模式 | 用途 | TTL |
-|--------|------|-----|
-| `ilm:token:{userId}:{YYYY-MM}` | 月度 token 计量 | 35 天 |
-| `ilm:dialogue:{userId}:{YYYY-MM-DD}` | 每日对话计数 | 48 小时 |
-| `ilm:sms:{phone}` | SMS 验证码 | 5 分钟 |
+## 十、关联文档
 
-### 异步任务
-
-`IlmTokenServiceImpl` 和 `IlmAnalyticsServiceImpl` 使用 `@Async`。确保 RuoYi 启动类或配置中启用了 `@EnableAsync`。
-
-### MyBatis Mapper 扫描
-
-所有 Mapper 使用了 `@Mapper` 注解。如果 RuoYi 的 `@MapperScan` 不覆盖 `com.ruoyi.ilightmate.mapper`，需要在启动类添加：
-
-```java
-@MapperScan({"com.ruoyi.**.mapper"})
-```
-
-RuoYi 默认已经是 `com.ruoyi.**.mapper`，所以应该不需要改。
+| 文件 | 位置 | 说明 |
+|------|------|------|
+| 前端交接文档 | `ilightmate/HANDOFF-STEVE.md` | API 契约 + Store 迁移 |
+| 上线计划 | `ilightmate/LAUNCH-PLAN.md` | 12 周路线图 + 团队分工 |
+| 定价共识 | `ilightmate/src/config/pricing-consensus.md` | 3 层定价详细说明 |
+| Sahil 策略 | `ilightmate/SAHIL-STRATEGY.md` | 定价 + 营销 + 增长策略 |
 
 ---
 
-## 十二、后续开发优先级
-
-| 优先级 | 任务 | 说明 |
-|--------|------|------|
-| **P0** | 配置环境变量 + 编译启动 | 确认项目能跑起来 |
-| **P0** | 测试 SMS 登录流程 | 开发模式测试（验证码打印到日志） |
-| **P0** | 测试 AI 对话 SSE | 用 curl 或 Postman 测试流式响应 |
-| **P1** | 微信支付 SDK 填充 | 3 个 TODO 位置 |
-| **P1** | 支付宝回调测试 | 用支付宝沙箱环境 |
-| **P2** | W2 用户数据 CRUD API | 11 张表的增删改查（替代前端 localStorage） |
-| **P2** | 订阅过期定时任务 | RuoYi quartz 模块，每天检查 end_time |
-| **P3** | 后台管理 API | 替换前端 mock 数据（按需） |
-
----
-
-## 附件位置
-
-| 文件 | 说明 |
-|------|------|
-| `sql/ilightmate.sql` | 19 张表 DDL + 种子数据 |
-| `ruoyi-ilightmate/pom.xml` | 模块依赖（OkHttp + Alipay SDK + WechatPay SDK + Aliyun SMS） |
-| `ruoyi-admin/src/main/resources/application.yml` | ilightmate.* 配置块 |
-| `ilightmate/HANDOFF-STEVE.md` | 前端交接文档（API 契约 + Store 迁移指南） |
-
----
-
-> **核心信息：后端代码 37 个 Java 文件已写好，你只需要配密钥 + 填微信 SDK 3 个 TODO + 编译启动。**
+> **核心信息：45 个 Java 文件全部写好，业务逻辑完整。你只需要配密钥 + 填微信 SDK 4 个 TODO + 配 3 个定时任务 + 编译启动。**
