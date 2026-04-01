@@ -27,11 +27,19 @@ public class IlmDiaryController {
 
     @PostMapping("/entry")
     public AjaxResult create(@RequestBody Map<String, Object> params) {
+        String content = (String) params.get("content");
+        if (content == null || content.trim().isEmpty()) {
+            return AjaxResult.error("日记内容不能为空");
+        }
+        int mood = params.containsKey("mood") ? ((Number) params.get("mood")).intValue() : 3;
+        if (mood < 1 || mood > 5) {
+            return AjaxResult.error("心情值必须在1到5之间");
+        }
         Long userId = SecurityUtils.getUserId();
         IlmDiaryEntry entry = new IlmDiaryEntry();
         entry.setUserId(userId);
-        entry.setContent((String) params.get("content"));
-        entry.setMood(params.containsKey("mood") ? ((Number) params.get("mood")).intValue() : 3);
+        entry.setContent(content);
+        entry.setMood(mood);
         entry.setEmotions(toJsonString(params.get("emotions")));
         entry.setFamilyMentions(toJsonString(params.get("familyMentions")));
         entry.setAiInsight((String) params.get("aiInsight"));
@@ -42,6 +50,9 @@ public class IlmDiaryController {
 
     @GetMapping("/entries")
     public AjaxResult list(@RequestParam(defaultValue = "365") int limit) {
+        if (limit <= 0 || limit > 1000) {
+            return AjaxResult.error("查询条数必须在1到1000之间");
+        }
         Long userId = SecurityUtils.getUserId();
         List<IlmDiaryEntry> entries = diaryMapper.selectByUserId(userId, limit);
         return AjaxResult.success(entries);

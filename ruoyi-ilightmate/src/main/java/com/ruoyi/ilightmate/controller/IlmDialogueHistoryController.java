@@ -43,6 +43,9 @@ public class IlmDialogueHistoryController {
 
     @GetMapping("/history")
     public AjaxResult list(@RequestParam(defaultValue = "50") int limit) {
+        if (limit <= 0 || limit > 1000) {
+            return AjaxResult.error("查询条数必须在1到1000之间");
+        }
         Long userId = SecurityUtils.getUserId();
         List<IlmDialogueHistory> list = historyMapper.selectByUserId(userId, limit);
         return AjaxResult.success(list);
@@ -51,6 +54,9 @@ public class IlmDialogueHistoryController {
     @GetMapping("/history/companion/{companionId}")
     public AjaxResult listByCompanion(@PathVariable String companionId,
                                        @RequestParam(defaultValue = "20") int limit) {
+        if (limit <= 0 || limit > 1000) {
+            return AjaxResult.error("查询条数必须在1到1000之间");
+        }
         Long userId = SecurityUtils.getUserId();
         List<IlmDialogueHistory> list = historyMapper.selectByUserAndCompanion(userId, companionId, limit);
         return AjaxResult.success(list);

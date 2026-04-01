@@ -61,45 +61,53 @@ public class IlmComboServiceImpl implements IIlmComboService {
             return;
         }
 
-        // 查找当前有效订阅
         IlmUserSubscription currentSub = subscriptionMapper.selectActiveByUserId(userId);
-
-        Date startTime;
-        Date endTime;
-
-        if (currentSub != null) {
-            // ── 已有订阅的情况 ──
-
-            int currentLevel = codeToLevel(currentSub.getComboCode());
-            int newLevel = codeToLevel(plan.getComboCode());
-
-            if (newLevel > currentLevel) {
-                // 升级：立即生效，旧订阅作废
-                subscriptionMapper.expireByUserId(userId);
-                startTime = new Date();
-                endTime = calculateEndTime(startTime, plan);
-                log.info("User {} upgraded from {} to {}", userId, currentSub.getComboName(), plan.getComboName());
-
-            } else if (newLevel == currentLevel) {
-                // 同级续费：在现有到期时间上延长
-                startTime = currentSub.getStartTime();
-                Date baseTime = currentSub.getEndTime().after(new Date()) ? currentSub.getEndTime() : new Date();
-                endTime = calculateEndTime(baseTime, plan);
-                subscriptionMapper.expireByUserId(userId);
-                log.info("User {} renewed {} until {}", userId, plan.getComboName(), endTime);
-
-            } else {
-                // 降级：不允许。用户只能等到期后购买低级套餐。
-                log.warn("User {} attempted downgrade from {} to {}, rejected", userId, currentSub.getComboName(), plan.getComboName());
-                return;
-            }
-        } else {
-            // ── 没有订阅（新用户或已过期）──
-            startTime = new Date();
-            endTime = calculateEndTime(startTime, plan);
+        Date[] period = resolveSubscriptionPeriod(userId, currentSub, plan);
+        if (period == null) {
+            return; // downgrade rejected
         }
 
-        // 创建新订阅记录
+        insertSubscription(userId, comboId, plan, period[0], period[1]);
+    }
+
+    /**
+     * Resolve start/end times based on upgrade, renewal, or new subscription.
+     * Returns null if the operation is a downgrade (not allowed).
+     */
+    private Date[] resolveSubscriptionPeriod(Long userId, IlmUserSubscription currentSub, IlmComboPlan plan) {
+        if (currentSub == null) {
+            Date start = new Date();
+            return new Date[]{start, calculateEndTime(start, plan)};
+        }
+
+        int currentLevel = codeToLevel(currentSub.getComboCode());
+        int newLevel = codeToLevel(plan.getComboCode());
+
+        if (newLevel > currentLevel) {
+            // Upgrade: take effect immediately, expire old subscription
+            subscriptionMapper.expireByUserId(userId);
+            Date start = new Date();
+            log.info("User {} upgraded from {} to {}", userId, currentSub.getComboName(), plan.getComboName());
+            return new Date[]{start, calculateEndTime(start, plan)};
+
+        } else if (newLevel == currentLevel) {
+            // Same-tier renewal: extend from current end time
+            Date start = currentSub.getStartTime();
+            Date baseTime = currentSub.getEndTime().after(new Date()) ? currentSub.getEndTime() : new Date();
+            Date end = calculateEndTime(baseTime, plan);
+            subscriptionMapper.expireByUserId(userId);
+            log.info("User {} renewed {} until {}", userId, plan.getComboName(), end);
+            return new Date[]{start, end};
+
+        } else {
+            // Downgrade not allowed
+            log.warn("User {} attempted downgrade from {} to {}, rejected", userId, currentSub.getComboName(), plan.getComboName());
+            return null;
+        }
+    }
+
+    /** Create and persist a new subscription record. */
+    private void insertSubscription(Long userId, Long comboId, IlmComboPlan plan, Date startTime, Date endTime) {
         IlmUserSubscription sub = new IlmUserSubscription();
         sub.setUserId(userId);
         sub.setComboId(comboId);

@@ -1,6 +1,7 @@
 package com.ruoyi.ilightmate.task;
 
 import com.ruoyi.ilightmate.domain.IlmUserSubscription;
+import com.ruoyi.ilightmate.mapper.IlmActivityMapper;
 import com.ruoyi.ilightmate.mapper.IlmUserSubscriptionMapper;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +31,9 @@ public class SubscriptionRenewRemindTask {
     @Autowired
     private IlmUserSubscriptionMapper subscriptionMapper;
 
+    @Autowired
+    private IlmActivityMapper activityMapper;
+
     public void execute() {
         // 3 天内到期
         List<IlmUserSubscription> expiringIn3Days = subscriptionMapper.selectExpiringSoon(3);
@@ -54,7 +58,12 @@ public class SubscriptionRenewRemindTask {
     }
 
     private void sendRemind(IlmUserSubscription sub, String message) {
-        // TODO: 对接推送服务（站内信 / 微信模板消息 / SMS）
+        // Write to ilm_activities as in-app notification; user sees it in Journey activity timeline
+        try {
+            activityMapper.insert(sub.getUserId(), "system", "续费提醒", message);
+        } catch (Exception e) {
+            log.warn("Failed to save remind for user {}: {}", sub.getUserId(), e.getMessage());
+        }
         log.info("[RenewRemind] user={} plan={} msg={}", sub.getUserId(), sub.getComboName(), message);
     }
 }

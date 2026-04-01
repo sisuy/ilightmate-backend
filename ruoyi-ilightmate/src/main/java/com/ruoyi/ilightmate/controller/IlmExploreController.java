@@ -43,6 +43,11 @@ public class IlmExploreController {
 
     @PostMapping("/scores")
     public AjaxResult updateScores(@RequestBody Map<String, Integer> scores) {
+        for (Map.Entry<String, Integer> entry : scores.entrySet()) {
+            if (entry.getValue() == null || entry.getValue() < 0 || entry.getValue() > 100) {
+                return AjaxResult.error("维度「" + entry.getKey() + "」的分数必须在0到100之间");
+            }
+        }
         Long userId = SecurityUtils.getUserId();
         IlmExploreScore existing = scoreMapper.selectByUserId(userId);
 

@@ -47,6 +47,9 @@ public class IlmFamilyTreeController {
         Long userId = SecurityUtils.getUserId();
         String treeName = (String) params.getOrDefault("treeName", "我的家族树");
         String treeData = (String) params.get("treeData");
+        if (treeData == null || treeData.trim().isEmpty()) {
+            return AjaxResult.error("家族树数据不能为空");
+        }
         int memberCount = params.containsKey("memberCount") ? ((Number) params.get("memberCount")).intValue() : 0;
         int generationCount = params.containsKey("generationCount") ? ((Number) params.get("generationCount")).intValue() : 0;
 
@@ -56,9 +59,15 @@ public class IlmFamilyTreeController {
 
     @PutMapping("/{treeId}")
     public AjaxResult update(@PathVariable Long treeId, @RequestBody Map<String, Object> params) {
+        if (treeId == null || treeId <= 0) {
+            return AjaxResult.error("家族树ID无效");
+        }
         Long userId = SecurityUtils.getUserId();
         String treeName = (String) params.getOrDefault("treeName", "我的家族树");
         String treeData = (String) params.get("treeData");
+        if (treeData == null || treeData.trim().isEmpty()) {
+            return AjaxResult.error("家族树数据不能为空");
+        }
         int memberCount = params.containsKey("memberCount") ? ((Number) params.get("memberCount")).intValue() : 0;
         int generationCount = params.containsKey("generationCount") ? ((Number) params.get("generationCount")).intValue() : 0;
 

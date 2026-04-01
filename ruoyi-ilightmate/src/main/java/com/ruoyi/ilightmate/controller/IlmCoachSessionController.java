@@ -29,12 +29,20 @@ public class IlmCoachSessionController {
 
     @PostMapping("/session")
     public AjaxResult create(@RequestBody Map<String, Object> params) {
+        String theme = (String) params.get("theme");
+        String subTopic = (String) params.get("subTopic");
+        if (theme == null || theme.trim().isEmpty()) {
+            return AjaxResult.error("会话主题不能为空");
+        }
+        if (subTopic == null || subTopic.trim().isEmpty()) {
+            return AjaxResult.error("会话子主题不能为空");
+        }
         Long userId = SecurityUtils.getUserId();
 
         IlmCoachSession session = new IlmCoachSession();
         session.setUserId(userId);
-        session.setTheme((String) params.get("theme"));
-        session.setSubTopic((String) params.get("subTopic"));
+        session.setTheme(theme);
+        session.setSubTopic(subTopic);
         session.setCurrentStep(1);
         session.setCompleted(false);
         session.setRadarBefore(toJsonString(params.get("radarBefore")));

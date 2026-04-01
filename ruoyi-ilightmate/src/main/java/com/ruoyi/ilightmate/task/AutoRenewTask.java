@@ -2,6 +2,7 @@ package com.ruoyi.ilightmate.task;
 
 import com.ruoyi.ilightmate.domain.IlmOrder;
 import com.ruoyi.ilightmate.domain.IlmUserSubscription;
+import com.ruoyi.ilightmate.mapper.IlmActivityMapper;
 import com.ruoyi.ilightmate.mapper.IlmOrderMapper;
 import com.ruoyi.ilightmate.mapper.IlmUserSubscriptionMapper;
 import com.ruoyi.ilightmate.service.IIlmComboService;
@@ -44,6 +45,9 @@ public class AutoRenewTask {
     @Autowired
     private IIlmComboService comboService;
 
+    @Autowired
+    private IlmActivityMapper activityMapper;
+
     public void execute() {
         // 查找今天到期的月付订阅（billing_cycle = MONTHLY）
         List<IlmUserSubscription> expiring = subscriptionMapper.selectMonthlyExpiringSoon(0);
@@ -85,7 +89,12 @@ public class AutoRenewTask {
                 } else {
                     failed++;
                     log.warn("Auto-renew deduct failed: user={}", sub.getUserId());
-                    // TODO: 发送续费失败提醒
+                    try {
+                        activityMapper.insert(sub.getUserId(), "system", "续费失败提醒",
+                                "自动续费未成功，请手动续费以继续使用" + sub.getComboName());
+                    } catch (Exception e) {
+                        log.warn("Failed to save renew-failure remind for user {}: {}", sub.getUserId(), e.getMessage());
+                    }
                 }
 
             } catch (Exception e) {
@@ -120,14 +129,14 @@ public class AutoRenewTask {
      * 微信：contract_id 委托代扣
      */
     private boolean executeAutoDeduct(String agreementNo, IlmOrder order) {
-        // TODO: 对接支付宝周期扣款 / 微信委托代扣
-        // 支付宝文档：https://opendocs.alipay.com/open/20190319
-        // 微信文档：https://pay.weixin.qq.com/wiki/doc/apiv3/apis/chapter6_1_1.shtml
+        // Stub: payment SDK not yet integrated (Alipay / WeChat auto-deduct)
+        // Alipay docs: https://opendocs.alipay.com/open/20190319
+        // WeChat docs: https://pay.weixin.qq.com/wiki/doc/apiv3/apis/chapter6_1_1.shtml
 
         log.info("Auto-deduct attempt: agreement={} orderNo={} amount={}",
                 agreementNo, order.getOrderNo(), order.getPayAmount());
 
-        // 暂时返回 false（需要 Steve 对接实际 SDK）
+        // Returns false until payment SDK is wired up
         return false;
     }
 

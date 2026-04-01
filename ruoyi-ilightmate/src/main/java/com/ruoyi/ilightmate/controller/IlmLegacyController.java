@@ -48,10 +48,19 @@ public class IlmLegacyController {
             return AjaxResult.error("成长版最多创建" + GROWTH_LEGACY_LIMIT + "位传承成员，请升级专业版");
         }
 
+        String name = (String) params.get("name");
+        String role = (String) params.get("role");
+        if (name == null || name.trim().isEmpty()) {
+            return AjaxResult.error("传承成员姓名不能为空");
+        }
+        if (role == null || role.trim().isEmpty()) {
+            return AjaxResult.error("传承成员角色不能为空");
+        }
+
         IlmLegacyMember member = new IlmLegacyMember();
         member.setUserId(userId);
-        member.setName((String) params.get("name"));
-        member.setRole((String) params.get("role"));
+        member.setName(name);
+        member.setRole(role);
         member.setToneStyle((String) params.get("toneStyle"));
         member.setAtmosphere((String) params.get("atmosphere"));
         member.setCatchphrases(toJsonString(params.get("catchphrases")));

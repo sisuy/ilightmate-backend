@@ -36,8 +36,11 @@ public class IlmMentorController {
      */
     @PostMapping("/register")
     public AjaxResult register(@RequestBody Map<String, String> params) {
+        String name = params.get("name");
+        if (name == null || name.trim().isEmpty()) {
+            return AjaxResult.error("导师姓名不能为空");
+        }
         Long userId = SecurityUtils.getUserId();
-        String name = params.getOrDefault("name", "导师");
         String phone = params.get("phone");
 
         IlmPartner partner = mentorService.registerAsMentor(userId, name, phone);

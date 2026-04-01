@@ -27,6 +27,9 @@ public class IlmTheaterController {
 
     @PostMapping("/session")
     public AjaxResult create(@RequestBody Map<String, Object> params) {
+        if (params.get("realityPositions") == null) {
+            return AjaxResult.error("现实位置数据不能为空");
+        }
         Long userId = SecurityUtils.getUserId();
         IlmTheaterSession session = new IlmTheaterSession();
         session.setUserId(userId);

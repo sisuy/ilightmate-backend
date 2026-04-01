@@ -5,10 +5,16 @@ import com.alipay.api.DefaultAlipayClient;
 import com.alipay.api.request.AlipayTradeRefundRequest;
 import com.alipay.api.response.AlipayTradeRefundResponse;
 import com.ruoyi.ilightmate.config.AlipayConfig;
+import com.ruoyi.ilightmate.config.WechatPayConfig;
 import com.ruoyi.ilightmate.domain.IlmOrder;
 import com.ruoyi.ilightmate.mapper.IlmOrderMapper;
 import com.ruoyi.ilightmate.mapper.IlmUserSubscriptionMapper;
 import com.ruoyi.ilightmate.service.IIlmRefundService;
+import com.wechat.pay.java.core.RSAAutoCertificateConfig;
+import com.wechat.pay.java.service.refund.RefundService;
+import com.wechat.pay.java.service.refund.model.AmountReq;
+import com.wechat.pay.java.service.refund.model.CreateRequest;
+import com.wechat.pay.java.service.refund.model.Refund;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -16,6 +22,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.Date;
 
 @Service
@@ -31,6 +39,9 @@ public class IlmRefundServiceImpl implements IIlmRefundService {
 
     @Autowired
     private AlipayConfig alipayConfig;
+
+    @Autowired
+    private WechatPayConfig wechatConfig;
 
     @Override
     @Transactional
@@ -90,19 +101,42 @@ public class IlmRefundServiceImpl implements IIlmRefundService {
     }
 
     private void refundWechat(IlmOrder order, BigDecimal amount, String reason) {
-        // TODO: 使用 wechatpay-java SDK 调用退款接口
-        // RefundService refundService = new RefundService.Builder().config(config).build();
-        // CreateRequest createRequest = new CreateRequest();
-        // createRequest.setOutTradeNo(order.getOrderNo());
-        // createRequest.setOutRefundNo("REF" + order.getOrderNo());
-        // AmountReq amountReq = new AmountReq();
-        // amountReq.setRefund(amount.multiply(new BigDecimal(100)).longValue());
-        // amountReq.setTotal(order.getPayAmount().multiply(new BigDecimal(100)).longValue());
-        // amountReq.setCurrency("CNY");
-        // createRequest.setAmount(amountReq);
-        // createRequest.setReason(reason);
-        // Refund refund = refundService.create(createRequest);
+        try {
+            RSAAutoCertificateConfig config = buildWechatConfig();
+            RefundService refundService = new RefundService.Builder().config(config).build();
+            CreateRequest createRequest = buildRefundRequest(order, amount, reason);
+            Refund refund = refundService.create(createRequest);
+            log.info("WeChat refund success: orderNo={} refundId={} status={}",
+                    order.getOrderNo(), refund.getRefundId(), refund.getStatus());
+        } catch (Exception e) {
+            log.error("WeChat refund error: {}", e.getMessage(), e);
+            throw new RuntimeException("微信退款异常: " + e.getMessage(), e);
+        }
+    }
 
-        log.info("WeChat refund requested for order {} amount {}", order.getOrderNo(), amount);
+    private RSAAutoCertificateConfig buildWechatConfig() {
+        String keyPath = wechatConfig.getPrivateKeyPath();
+        if (keyPath == null || !Files.exists(Paths.get(keyPath))) {
+            throw new RuntimeException("微信支付私钥文件不存在: " + keyPath);
+        }
+        return new RSAAutoCertificateConfig.Builder()
+                .merchantId(wechatConfig.getMchId())
+                .privateKeyFromPath(wechatConfig.getPrivateKeyPath())
+                .merchantSerialNumber(wechatConfig.getCertSerialNo())
+                .apiV3Key(wechatConfig.getApiKeyV3())
+                .build();
+    }
+
+    private CreateRequest buildRefundRequest(IlmOrder order, BigDecimal amount, String reason) {
+        CreateRequest createRequest = new CreateRequest();
+        createRequest.setOutTradeNo(order.getOrderNo());
+        createRequest.setOutRefundNo("REF" + order.getOrderNo());
+        AmountReq amountReq = new AmountReq();
+        amountReq.setRefund(amount.multiply(new BigDecimal("100")).longValue());
+        amountReq.setTotal(order.getPayAmount().multiply(new BigDecimal("100")).longValue());
+        amountReq.setCurrency("CNY");
+        createRequest.setAmount(amountReq);
+        createRequest.setReason(reason != null ? reason : "用户申请退款");
+        return createRequest;
     }
 }

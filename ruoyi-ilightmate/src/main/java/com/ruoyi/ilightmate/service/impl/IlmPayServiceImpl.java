@@ -12,13 +12,26 @@ import com.ruoyi.ilightmate.config.AlipayConfig;
 import com.ruoyi.ilightmate.config.WechatPayConfig;
 import com.ruoyi.ilightmate.service.IIlmOrderService;
 import com.ruoyi.ilightmate.service.IIlmPayService;
+import com.wechat.pay.java.core.RSAAutoCertificateConfig;
+import com.wechat.pay.java.core.notification.NotificationParser;
+import com.wechat.pay.java.core.notification.RequestParam;
+import com.wechat.pay.java.service.payments.model.Transaction;
+import com.wechat.pay.java.service.payments.nativepay.NativePayService;
+import com.wechat.pay.java.service.payments.nativepay.model.Amount;
+import com.wechat.pay.java.service.payments.nativepay.model.PrepayRequest;
+import com.wechat.pay.java.service.payments.nativepay.model.PrepayResponse;
+import com.wechat.pay.java.service.payments.nativepay.model.QueryOrderByOutTradeNoRequest;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.util.StreamUtils;
 
 import javax.annotation.PostConstruct;
 import javax.servlet.http.HttpServletRequest;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -37,6 +50,9 @@ public class IlmPayServiceImpl implements IIlmPayService {
     private IIlmOrderService orderService;
 
     private AlipayClient alipayClient;
+    private RSAAutoCertificateConfig wechatSdkConfig;
+    private NativePayService nativePayService;
+    private NotificationParser notificationParser;
 
     @PostConstruct
     public void init() {
@@ -48,6 +64,38 @@ public class IlmPayServiceImpl implements IIlmPayService {
                 alipayConfig.getPublicKey(),
                 "RSA2"
         );
+        initWechatSdk();
+    }
+
+    /**
+     * 初始化微信支付 SDK (RSAAutoCertificateConfig)
+     */
+    private void initWechatSdk() {
+        try {
+            String keyPath = wechatConfig.getPrivateKeyPath();
+            if (keyPath == null || !Files.exists(Paths.get(keyPath))) {
+                log.warn("微信支付私钥文件不存在: {}，微信支付功能不可用", keyPath);
+                return;
+            }
+            wechatSdkConfig = new RSAAutoCertificateConfig.Builder()
+                    .merchantId(wechatConfig.getMchId())
+                    .privateKeyFromPath(wechatConfig.getPrivateKeyPath())
+                    .merchantSerialNumber(wechatConfig.getCertSerialNo())
+                    .apiV3Key(wechatConfig.getApiKeyV3())
+                    .build();
+            nativePayService = new NativePayService.Builder().config(wechatSdkConfig).build();
+            notificationParser = new NotificationParser(wechatSdkConfig);
+            log.info("微信支付 SDK 初始化成功, mchId={}", wechatConfig.getMchId());
+        } catch (Exception e) {
+            log.error("微信支付 SDK 初始化失败: {}", e.getMessage(), e);
+            throw new RuntimeException("微信支付 SDK 初始化失败: " + e.getMessage(), e);
+        }
+    }
+
+    private void ensureWechatReady() {
+        if (nativePayService == null || wechatSdkConfig == null) {
+            throw new RuntimeException("微信支付 SDK 未初始化，请检查私钥文件配置");
+        }
     }
 
     // ════════════════════════════════════════════════
@@ -166,58 +214,58 @@ public class IlmPayServiceImpl implements IIlmPayService {
 
     @Override
     public Map<String, Object> createWechatNative(String orderNo, String amountYuan) {
+        ensureWechatReady();
         Map<String, Object> result = new HashMap<>();
         try {
-            // 微信支付 V3 Native 下单
-            // 使用 wechatpay-java SDK
             int amountFen = (int) (Double.parseDouble(amountYuan) * 100);
+            PrepayRequest request = buildNativePrepayRequest(orderNo, amountFen);
+            PrepayResponse response = nativePayService.prepay(request);
 
-            // TODO: 使用 wechatpay-java SDK 的 NativePayService
-            // NativePayService service = new NativePayService.Builder().config(config).build();
-            // PrepayRequest request = new PrepayRequest();
-            // request.setAppid(wechatConfig.getAppId());
-            // request.setMchid(wechatConfig.getMchId());
-            // request.setDescription("iLightMate 知见光伙伴");
-            // request.setOutTradeNo(orderNo);
-            // request.setNotifyUrl(wechatConfig.getNotifyUrl());
-            // Amount amount = new Amount();
-            // amount.setTotal(amountFen);
-            // amount.setCurrency("CNY");
-            // request.setAmount(amount);
-            // PrepayResponse response = service.prepay(request);
-            // result.put("payUrl", response.getCodeUrl()); // 二维码链接
-
-            // 临时返回占位（Steve 用实际 SDK 替换）
             result.put("orderNo", orderNo);
             result.put("payType", "WECHAT");
-            result.put("payUrl", "weixin://wxpay/bizpayurl?pr=placeholder_" + orderNo);
-
+            result.put("payUrl", response.getCodeUrl());
             log.info("WeChat Native pay created for order {} amount {} fen", orderNo, amountFen);
         } catch (Exception e) {
-            log.error("WeChat pay error: {}", e.getMessage());
-            throw new RuntimeException("微信支付创建失败: " + e.getMessage());
+            log.error("WeChat pay error: {}", e.getMessage(), e);
+            throw new RuntimeException("微信支付创建失败: " + e.getMessage(), e);
         }
         return result;
     }
 
+    private PrepayRequest buildNativePrepayRequest(String orderNo, int amountFen) {
+        PrepayRequest request = new PrepayRequest();
+        request.setAppid(wechatConfig.getAppId());
+        request.setMchid(wechatConfig.getMchId());
+        request.setDescription("iLightMate 知见光伙伴");
+        request.setOutTradeNo(orderNo);
+        request.setNotifyUrl(wechatConfig.getNotifyUrl());
+        Amount amount = new Amount();
+        amount.setTotal(amountFen);
+        amount.setCurrency("CNY");
+        request.setAmount(amount);
+        return request;
+    }
+
     @Override
     public Map<String, Object> queryWechat(String outTradeNo) {
+        ensureWechatReady();
         Map<String, Object> result = new HashMap<>();
         try {
-            // TODO: 使用 wechatpay-java SDK 查询
-            // QueryOrderByOutTradeNoRequest request = new QueryOrderByOutTradeNoRequest();
-            // request.setMchid(wechatConfig.getMchId());
-            // request.setOutTradeNo(outTradeNo);
-            // Transaction transaction = service.queryOrderByOutTradeNo(request);
-            // result.put("tradeState", transaction.getTradeState().name());
+            QueryOrderByOutTradeNoRequest request = new QueryOrderByOutTradeNoRequest();
+            request.setMchid(wechatConfig.getMchId());
+            request.setOutTradeNo(outTradeNo);
+            Transaction transaction = nativePayService.queryOrderByOutTradeNo(request);
 
-            // 临时占位
             result.put("outTradeNo", outTradeNo);
-            result.put("tradeState", "NOTPAY");
-            result.put("tradeStateDesc", "查询中");
+            result.put("tradeState", transaction.getTradeState().name());
+            result.put("tradeStateDesc", transaction.getTradeStateDesc());
+            if (transaction.getTransactionId() != null) {
+                result.put("transactionId", transaction.getTransactionId());
+            }
         } catch (Exception e) {
-            log.error("WeChat query error: {}", e.getMessage());
+            log.error("WeChat query error: {}", e.getMessage(), e);
             result.put("tradeState", "ERROR");
+            result.put("msg", e.getMessage());
         }
         return result;
     }
@@ -225,24 +273,29 @@ public class IlmPayServiceImpl implements IIlmPayService {
     @Override
     public String handleWechatNotify(HttpServletRequest request) {
         try {
-            // TODO: 使用 wechatpay-java SDK 验签 + 解密
-            // RequestParam requestParam = new RequestParam.Builder()
-            //     .serialNumber(request.getHeader("Wechatpay-Serial"))
-            //     .nonce(request.getHeader("Wechatpay-Nonce"))
-            //     .timestamp(request.getHeader("Wechatpay-Timestamp"))
-            //     .signature(request.getHeader("Wechatpay-Signature"))
-            //     .body(StreamUtils.copyToString(request.getInputStream(), StandardCharsets.UTF_8))
-            //     .build();
-            // Transaction transaction = notificationParser.parse(requestParam, Transaction.class);
-            // if (Transaction.TradeStateEnum.SUCCESS.equals(transaction.getTradeState())) {
-            //     orderService.markPaid(transaction.getOutTradeNo(), "WECHAT", transaction.getTransactionId());
-            // }
+            ensureWechatReady();
+            RequestParam requestParam = buildNotifyRequestParam(request);
+            Transaction transaction = notificationParser.parse(requestParam, Transaction.class);
 
-            log.info("WeChat notify received");
+            log.info("WeChat notify received: orderNo={} state={}", transaction.getOutTradeNo(), transaction.getTradeState());
+            if (Transaction.TradeStateEnum.SUCCESS.equals(transaction.getTradeState())) {
+                orderService.markPaid(transaction.getOutTradeNo(), "WECHAT", transaction.getTransactionId());
+            }
             return "{\"code\":\"SUCCESS\",\"message\":\"OK\"}";
         } catch (Exception e) {
-            log.error("WeChat notify error: {}", e.getMessage());
+            log.error("WeChat notify error: {}", e.getMessage(), e);
             return "{\"code\":\"FAIL\",\"message\":\"" + e.getMessage() + "\"}";
         }
+    }
+
+    private RequestParam buildNotifyRequestParam(HttpServletRequest request) throws Exception {
+        String body = StreamUtils.copyToString(request.getInputStream(), StandardCharsets.UTF_8);
+        return new RequestParam.Builder()
+                .serialNumber(request.getHeader("Wechatpay-Serial"))
+                .nonce(request.getHeader("Wechatpay-Nonce"))
+                .timestamp(request.getHeader("Wechatpay-Timestamp"))
+                .signature(request.getHeader("Wechatpay-Signature"))
+                .body(body)
+                .build();
     }
 }
