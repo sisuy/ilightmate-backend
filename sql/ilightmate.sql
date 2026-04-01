@@ -327,3 +327,25 @@ CREATE TABLE ilm_user_onboarding (
     update_time          DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (user_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='引导状态';
+
+-- ════════════════════════════════════════════════
+-- 家族树（核心业务数据）
+-- ════════════════════════════════════════════════
+
+CREATE TABLE ilm_family_trees (
+    id              BIGINT       NOT NULL AUTO_INCREMENT,
+    user_id         BIGINT       NOT NULL,
+    tree_name       VARCHAR(100) NOT NULL DEFAULT '我的家族树',
+    tree_data       JSON         NOT NULL COMMENT '完整 TreeData JSON（含所有 Person 节点）',
+    member_count    INT          NOT NULL DEFAULT 0,
+    generation_count INT         NOT NULL DEFAULT 0,
+    analysis_data   JSON         DEFAULT NULL COMMENT '七层分析结果 JSON',
+    patterns        JSON         DEFAULT NULL COMMENT '["parentification","cutoff"]',
+    family_type     VARCHAR(50)  DEFAULT NULL COMMENT '12种家族类型之一',
+    direction       VARCHAR(50)  DEFAULT NULL COMMENT '6种走向之一',
+    risk_level      VARCHAR(10)  DEFAULT NULL COMMENT 'low/medium/high',
+    create_time     DATETIME     DEFAULT CURRENT_TIMESTAMP,
+    update_time     DATETIME     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (id),
+    KEY idx_user (user_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='家族树';
