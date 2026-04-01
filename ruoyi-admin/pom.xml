@@ -47,6 +47,13 @@
             <artifactId>ruoyi-quartz</artifactId>
         </dependency>
 
+        <!-- iLightMate 业务模块 -->
+        <dependency>
+            <groupId>com.ruoyi</groupId>
+            <artifactId>ruoyi-ilightmate</artifactId>
+            <version>${ruoyi.version}</version>
+        </dependency>
+
         <!-- 代码生成-->
         <dependency>
             <groupId>com.ruoyi</groupId>
