@@ -35,4 +35,11 @@ public interface IlmOrderMapper {
             "JOIN ilm_combo_plans p ON o.combo_id = p.combo_id " +
             "WHERE o.user_id = #{userId} AND p.combo_code = #{comboCode} AND o.pay_status = 'PAID'")
     boolean hasEverPaid(@Param("userId") Long userId, @Param("comboCode") String comboCode);
+
+    /** 获取用户最近一笔已支付的月付订单（用于自动续费查协议号） */
+    @Select("SELECT o.* FROM ilm_orders o " +
+            "JOIN ilm_combo_plans p ON o.combo_id = p.combo_id " +
+            "WHERE o.user_id = #{userId} AND o.pay_status = 'PAID' AND p.billing_cycle = 'MONTHLY' " +
+            "ORDER BY o.pay_time DESC LIMIT 1")
+    IlmOrder selectLastPaidMonthlyByUserId(@Param("userId") Long userId);
 }

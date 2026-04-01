@@ -122,7 +122,21 @@ public class IlmOrderServiceImpl implements IIlmOrderService {
         // ── 1. 更新订单状态 ──
         orderMapper.updatePayStatus(orderNo, "PAID", payType, transactionNo, new Date());
 
-        // ── 2. 激活订阅 ──
+        // ── 2. 区分订单类型 ──
+        String remark = order.getRemark();
+        boolean isTokenAddon = remark != null && remark.startsWith("TOKEN_ADDON:");
+        boolean isAutoRenew = remark != null && remark.startsWith("AUTO_RENEW:");
+
+        if (isTokenAddon) {
+            // 加购包订单 → 增加 token
+            String[] parts = remark.split(":");
+            int tokens = Integer.parseInt(parts[2]);
+            tokenService.addBonusTokens(userId, tokens);
+            log.info("Token addon paid: user={} tokens=+{}", userId, tokens);
+            return; // 加购包不需要激活订阅和归因
+        }
+
+        // ── 3. 激活订阅（新购 / 续费 / 升级） ──
         comboService.activateSubscription(userId, order.getComboId(), orderNo);
 
         // ── 3. 首次付费 → 锁定归因 ──
