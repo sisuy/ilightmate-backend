@@ -29,4 +29,10 @@ public interface IlmOrderMapper {
     void updatePayStatus(@Param("orderNo") String orderNo, @Param("payStatus") String payStatus,
                          @Param("payType") String payType, @Param("transactionNo") String transactionNo,
                          @Param("payTime") Date payTime);
+
+    /** 检查用户是否曾经购买过某套餐（用于首月特惠判断） */
+    @Select("SELECT COUNT(*) > 0 FROM ilm_orders o " +
+            "JOIN ilm_combo_plans p ON o.combo_id = p.combo_id " +
+            "WHERE o.user_id = #{userId} AND p.combo_code = #{comboCode} AND o.pay_status = 'PAID'")
+    boolean hasEverPaid(@Param("userId") Long userId, @Param("comboCode") String comboCode);
 }

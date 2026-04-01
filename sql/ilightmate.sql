@@ -123,6 +123,7 @@ CREATE TABLE ilm_partners (
     partner_type   VARCHAR(20)  NOT NULL COMMENT 'channel/sales_rep/mentor',
     name           VARCHAR(100) NOT NULL,
     phone          VARCHAR(20)  DEFAULT NULL,
+    user_id        BIGINT       DEFAULT NULL COMMENT '关联 sys_user.user_id（导师类型必填）',
     referral_code  VARCHAR(20)  NOT NULL COMMENT 'CH-XXXX / SL-XXXX / MT-XXXX',
     parent_id      BIGINT       DEFAULT NULL COMMENT '上线伙伴 ID（渠道 Tier2）',
     sales_rep_id   BIGINT       DEFAULT NULL COMMENT '对接业务员 ID',
